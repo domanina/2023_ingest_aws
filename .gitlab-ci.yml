@@ -1,0 +1,105 @@
+image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.9.15
+
+stages:
+  - test
+  - history_copy
+  - reports
+  - deploy
+  - notification
+
+test:
+  stage: test
+  tags:
+    - docker
+  variables:
+    env_account_id: ""
+    env_region: ""
+    USERNAME: $USERNAME
+    PASSWORD: $PASSWORD
+    SECRET: $SECRET
+    ALLURE_RESULTS: "allure-results"
+  artifacts:
+    when: always
+    paths:
+      - ./allure-results
+    expire_in: 1 day
+    reports:
+      junit:
+        - junit.xml
+  before_script:
+    - export AWS_DEFAULT_REGION=$env_region
+    - test -d ~/.aws || mkdir ~/.aws/
+    - echo "[default]" > ~/.aws/config
+    - echo "region = $env_region" >> ~/.aws/config
+    - echo "role_arn=arn:aws:iam::$env_account_id:role/autotest-GitlabCiRunnerRole" >> ~/.aws/config
+    - echo "credential_source=Ec2InstanceMetadata" >> ~/.aws/config
+  script:
+    - export PATH=${PATH}:/root/.local/bin
+    - echo $PATH
+    - echo "Run automated NLD tests"
+    - pip3 install -r requirements.txt > /dev/null
+    - pytest -n 3 -vs --junit-xml=junit.xml --alluredir=allure-results
+
+history_job:
+  stage: history_copy
+  tags:
+    - docker
+  image:  ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/storytel/alpine-bash-curl
+  script:
+    - 'curl --location --output artifacts.zip "https://gitlab/api/v4/projects/$CI_PROJECT_ID/jobs/artifacts/master/download?job=pages&job_token=$CI_JOB_TOKEN"'
+    - apk add unzip
+    - unzip artifacts.zip
+    - chmod -R 777 public
+    - cp -r ./public/history ./allure-results
+  allow_failure: true
+  artifacts:
+    paths:
+      - ./allure-results
+    expire_in: 1 day
+  rules:
+    - when: always
+
+allure_job:
+  stage: reports
+  tags:
+    - docker
+  image:  ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/frankescobar/allure-docker-service
+  script:
+     - allure generate -c ./allure-results -o ./allure-report
+  artifacts:
+    paths:
+      - ./allure-results
+      - ./allure-report
+    expire_in: 1 day
+  rules:
+    - when: always
+
+pages:
+  stage: deploy
+  tags:
+    - docker
+  script:
+    - mkdir public
+    - mv ./allure-report/* public
+  artifacts:
+    paths:
+      - public
+  rules:
+    - when: always
+
+notify_error:
+  stage: notification
+  when: on_failure
+  only:
+    - master
+    - main
+  variables:
+    SLACK_ENVIRONMENT: ""
+    SLACK_CHANNEL: ""
+    SLACK_ERROR_MESSAGE: "..."
+  extends: .slack_error_notification
+
+include:
+  - project: "..."
+    ref: main
+    file: templates/slack_error_notification.yaml
