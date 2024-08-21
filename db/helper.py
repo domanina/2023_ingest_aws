@@ -20,7 +20,7 @@ def get_db_data(query: str, params: Optional[tuple] = None, wait_until: Optional
     return res
 
 
-def verify_db_data(query: str, params: Optional[tuple] = None):
+def get_success_status_from_db(query: str, params: Optional[tuple] = None):
     res = db_reader.execute(query, params)
     assert res is not None
     assert res[0] == "SUCCESS", logger.debug(
@@ -33,7 +33,7 @@ def wait_until(query: str, params: Optional[tuple] = None):
         start_time = datetime.now()
         response = not_empty_wait(
                 lambda:
-                verify_db_data(query, params), function_name="verify_sql_data")
+                get_success_status_from_db(query, params), function_name="verify_sql_data")
         dif_time = (datetime.now() - start_time).seconds
         logger.debug(f"--------->Time spent on execution: {dif_time} seconds")
     return response
